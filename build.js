@@ -786,8 +786,10 @@ function videoPlayerScript() {
     }
 
     function setupPlayer(player) {
-      var t = parseFloat(new URLSearchParams(location.search).get('t'));
-      if (isFinite(t) && t > 0) player.setAttribute('start-at', String(t));
+      // Note: start-at from URL ?t= is set synchronously in detail.html, BEFORE
+      // vig-player.js loads, so the seek happens during initial render rather
+      // than racing with autoplay. Re-applying it here would clobber any manual
+      // scrub the user made between page load and DOMContentLoaded.
 
       // Prefer history.back() over the player's back-href so the browser can
       // restore scroll position on the feed. The back-href stays as fallback

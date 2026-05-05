@@ -1,2 +1,15 @@
 {{{vigDetail}}}
+<script>
+  // Set start-at from URL ?t= synchronously, BEFORE vig-player.js loads.
+  // The attribute is then already on the element when the custom element
+  // upgrades, so the seek happens during the player's initial render rather
+  // than racing with autoplay after DOMContentLoaded.
+  (function () {
+    var t = parseFloat(new URLSearchParams(location.search).get('t'));
+    if (!isFinite(t) || t <= 0) return;
+    document.querySelectorAll('vig-player').forEach(function (p) {
+      p.setAttribute('start-at', String(t));
+    });
+  })();
+</script>
 <script type="module" src="{{vigPlayerSrc}}"></script>
