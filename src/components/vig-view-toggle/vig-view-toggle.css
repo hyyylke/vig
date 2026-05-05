@@ -1,0 +1,42 @@
+/* Layout shell for the feed/grid toggle. The two slotted <button>s stay in
+   light DOM so Datastar's data-on-click and data-class-active continue to
+   work — Datastar's MutationObserver doesn't penetrate shadow roots, but
+   slotted children are light-DOM children of the host. */
+
+:host {
+  display: block;
+  border-bottom: 1px solid var(--border);
+  max-width: var(--max-w);
+  margin: 0 auto;
+}
+
+.row {
+  display: flex;
+  width: 100%;
+}
+
+::slotted(button) {
+  flex: 1;
+  padding: 12px 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+::slotted(button.active) {
+  color: var(--text);
+  border-bottom-color: var(--text);
+}
+
+@media (min-width: 480px) {
+  :host {
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
+}

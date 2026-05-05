@@ -1,0 +1,30 @@
+/* The host fills its parent (<a class="post-media-link"> in feed, <a class="grid-cell">
+   in grid). Aspect-ratio differs per variant — feed cards are 9:16, grid cells
+   take the parent's dimensions verbatim. */
+
+:host {
+  position: relative;
+  display: block;
+  width: 100%;
+  background-color: #000;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+:host([variant="feed"]) {
+  aspect-ratio: 9 / 16;
+}
+
+:host([variant="grid"]) {
+  width: 100%;
+  height: 100%;
+}
+
+.vp {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;   /* horizontals crop into 9:16; verticals fit perfectly */
+  display: block;
+}

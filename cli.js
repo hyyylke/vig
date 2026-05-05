@@ -33,6 +33,14 @@ const env = {
   VIG_PLAYER_SRC,
 };
 
+// OSC 8 hyperlink escape — supported by iTerm2, Terminal.app, VS Code,
+// WezTerm, Kitty, Windows Terminal. Falls back to plain text in non-TTY
+// contexts (pipes, log files, CI) so we don't pollute output.
+function clickable(url, text = url) {
+  if (!process.stdout.isTTY) return text;
+  return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
+}
+
 function pickFreePort() {
   return new Promise((resolve, reject) => {
     const srv = netCreateServer();
@@ -67,7 +75,7 @@ async function main() {
 
   // 2. Serve — replaces this process so signals (Ctrl+C) propagate cleanly.
   console.log(`vig: serving ${cwd}`);
-  console.log(`     ${url}`);
+  console.log(`     ${clickable(url)}`);
   const serveProc = spawn(
     "node",
     [join(__dirname, "serve.js")],

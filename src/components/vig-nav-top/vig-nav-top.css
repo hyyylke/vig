@@ -1,0 +1,57 @@
+/* Sticky top bar with logo + icons. The :host carries the mobile-app-frame
+   layout (max-width + side borders on desktop) so the bar visually aligns
+   with .feed below. */
+
+:host {
+  display: block;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  max-width: var(--max-w);
+  margin: 0 auto;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--nav-h);
+  padding: 0 16px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.ig-logo {
+  width: 28px;
+  height: 28px;
+}
+
+.text {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  font-style: italic;
+}
+
+.icons {
+  display: flex;
+  gap: 16px;
+  color: var(--text);
+}
+
+.icons svg { cursor: pointer; }
+
+@media (min-width: 480px) {
+  :host {
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
+}

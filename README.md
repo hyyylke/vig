@@ -81,6 +81,15 @@ Override paths with env vars:
 | `VIG_PORT`        | random free port (cli)            | server port                                           |
 | `VIG_DEBUG`       | unset                             | log every ffmpeg call when `=1`                       |
 
+## Architecture
+
+vig is built as a small set of web components and page templates, with no
+runtime npm dependencies in the browser. See:
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) — overall structure and design decisions
+- [COMPONENTS.md](COMPONENTS.md) — practical recipe for adding or editing
+  components
+
 ## Requirements
 
 - Node 20 or newer

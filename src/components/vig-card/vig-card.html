@@ -1,0 +1,21 @@
+<article class="card">
+  <a class="header" href="{{href}}">
+    <div class="avatar">{{folderInitial}}</div>
+    <div class="header-info">
+      <span class="username">{{folder}}</span>
+      <span class="time">{{timeAgo}}</span>
+    </div>
+    <span class="menu">•••</span>
+  </a>
+
+  <slot name="media"></slot>
+
+  <div class="caption">
+    <span class="username">{{folder}}</span>
+    <span class="title">{{title}}</span>
+  </div>
+
+  <div class="meta">
+    <span>{{size}}</span>
+  </div>
+</article>

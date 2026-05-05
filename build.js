@@ -12,6 +12,7 @@ import { existsSync } from "fs";
 import { spawn } from "child_process";
 import { createHash } from "crypto";
 import { fileURLToPath } from "url";
+import { renderTemplate } from "./src/lib/template.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -885,294 +886,244 @@ function videoPlayerScript() {
       window.addEventListener('pagehide', function() { endSession(true); });
     }
 
-    // ── Hot-shots previews ──
-    // Every card is a <video>. JS plays clip 01.mp4 on hover / entering viewport
-    // and cycles src through NN.mp4 when a clip ends. Single-clip cards use the
-    // native video.loop attribute for seamless looping.
-    var cards = [];
-
-    document.querySelectorAll('.hot-shots').forEach(function(el) {
-      var base = el.dataset.hotShots;
-      var count = parseInt(el.dataset.hotShotsCount, 10) || 1;
-      if (!base || count < 1) return;
-
-      var handlers = setupClipCycle(el, base, count);
-      if (!handlers) return;
-
-      el.addEventListener('mouseenter', handlers.start);
-      el.addEventListener('mouseleave', handlers.stop);
-      cards.push({ el: el, handlers: handlers });
-    });
-
-    function setupClipCycle(el, base, count) {
-      var video = el.querySelector('.hot-shots-video');
-      if (!video) return null;
-
-      // Source-video start seconds per shot, and cumulative offsets within
-      // preview.mp4 — together they let us map current playback time back to
-      // a "click here = jump to this moment in source" deep-link.
-      var starts = (el.dataset.hotShotsStarts || '').split(',')
-        .map(parseFloat).filter(isFinite);
-      var cums = (el.dataset.hotShotsCums || '').split(',')
-        .map(parseFloat).filter(isFinite);
-      var link = el.closest('a');
-      var linkBase = link ? link.getAttribute('href') : null;
-      var active = false;
-      var previewUrl = base + '/preview.mp4';
-
-      function clipIndexAt(t) {
-        for (var i = cums.length - 1; i >= 0; i--) {
-          if (t >= cums[i]) return i;
-        }
-        return 0;
-      }
-
-      function syncHref() {
-        if (!link || !linkBase) return;
-        var s = starts[clipIndexAt(video.currentTime)];
-        if (!isFinite(s) || s <= 0) {
-          link.setAttribute('href', linkBase);
-        } else {
-          link.setAttribute('href', linkBase + '?t=' + s.toFixed(2));
-        }
-      }
-
-      video.addEventListener('timeupdate', syncHref);
-      syncHref();
-
-      return {
-        start: function() {
-          if (active) return;
-          active = true;
-          // Attach src on demand. preload="none" + a missing src means no
-          // decoder/buffer is held until we actively play this card.
-          if (!video.getAttribute('src')) video.src = previewUrl;
-          var p = video.play();
-          if (p && p.catch) p.catch(function(){});
-        },
-        stop: function() {
-          if (!active) return;
-          active = false;
-          video.pause();
-          // Free the decoder + any buffered video. Without this, scrolling
-          // a 127-card gallery accumulates ~5-10MB per card in held state
-          // and Safari reloads the tab when it crosses ~1GB.
-          video.removeAttribute('src');
-          video.load();
-          syncHref();
-        },
-      };
-    }
-
-    // ── Viewport autoplay ──
-    // Wait for window.load (posters + metadata settled) before enabling, with a
-    // hard fallback so slow/stalled resources don't stop us forever.
-    var autoplayArmed = false;
-    function armViewportAutoplay() {
-      if (autoplayArmed || cards.length === 0) return;
-      autoplayArmed = true;
-
-      if (!('IntersectionObserver' in window)) return;
-
-      var observer = new IntersectionObserver(function(entries) {
-        entries.forEach(function(entry) {
-          var card = cards.find(function(c) { return c.el === entry.target; });
-          if (!card) return;
-          if (entry.isIntersecting) card.handlers.start();
-          else card.handlers.stop();
-        });
-      }, { threshold: 0.5 });
-
-      cards.forEach(function(c) { observer.observe(c.el); });
-    }
-
-    if (document.readyState === 'complete') {
-      armViewportAutoplay();
-    } else {
-      window.addEventListener('load', armViewportAutoplay);
-      // Fallback — if 'load' hasn't fired within 2.5s (rare — a stalled request)
-      // we still kick off, so the feed doesn't sit idle.
-      setTimeout(armViewportAutoplay, 2500);
-    }
+    // Hot-shots cycling and viewport autoplay live inside the <vig-hot-shots>
+    // component (src/components/vig-hot-shots/) — each instance manages its
+    // own video lifecycle and registers with a shared IntersectionObserver.
   });
   ${"<"}/script>`;
 }
 
 // ─── Template: Shell ─────────────────────────────────────────────────────────
+// Wraps a body fragment in the full HTML document. Markup lives in
+// src/pages/_layout.html — this function only injects the data, including the
+// per-page list of component bundles to load.
 
-function shell(title, body, { isDetail = false } = {}) {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>${escapeHtml(title)}</title>
-  <link rel="stylesheet" href="${isDetail ? "../../" : ""}style.css">
-  <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-beta.11/bundles/datastar.js"></script>
-</head>
-<body>
-  ${body}
-  ${videoPlayerScript()}
-</body>
-</html>`;
-}
-
-// ─── Template: Nav Bar ───────────────────────────────────────────────────────
-
-function navBar(isDetail = false) {
+function shell(title, body, { isDetail = false, components = [] } = {}) {
   const prefix = isDetail ? "../../" : "";
-  return `
-  <nav class="nav-top">
-    <a href="${prefix}index.html" class="nav-logo">
-      <svg class="ig-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <polygon points="23 7 16 12 23 17 23 7"/>
-        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
-      </svg>
-      <span class="logo-text">vig</span>
-    </a>
-    <div class="nav-icons">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24">
-        <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
-      </svg>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24">
-        <path d="M3 6h18M3 12h18M3 18h18"/>
-      </svg>
-    </div>
-  </nav>`;
+  return renderTemplate(LAYOUT_TPL, {
+    title,
+    cssHref: prefix + "style.css",
+    body,
+    componentScripts: components.map((c) => `${prefix}components/${c}.js`),
+    footerScripts: videoPlayerScript(),
+  });
 }
 
-function navBottom(isDetail = false, activeHome = true) {
-  const prefix = isDetail ? "../../" : "";
-  return `
-  <nav class="nav-bottom">
-    <a href="${prefix}index.html" class="nav-bottom-item${activeHome ? " active" : ""}">
-      <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
-    </a>
-    <a class="nav-bottom-item">
-      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-    </a>
-    <a class="nav-bottom-item">
-      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/></svg>
-    </a>
-    <a class="nav-bottom-item">
-      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-    </a>
-    <a class="nav-bottom-item">
-      <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-    </a>
-  </nav>`;
+// ─── Components ──────────────────────────────────────────────────────────────
+// Each component lives at src/components/<name>/ as three sibling files:
+//   <name>.html  — shadow-DOM markup with {{var}} placeholders
+//   <name>.css   — scoped styles applied inside the shadow root
+//   <name>.js    — custom-element class
+// At build time we (a) server-render into Declarative Shadow DOM and (b) bundle
+// the trio into one ESM at _site/components/<name>.js so the browser's class
+// definition can take over for any non-SSR'd usage.
+
+async function loadComponentSources(name) {
+  const dir = join(__dirname, "src/components", name);
+  const [html, css, js] = await Promise.all([
+    readFile(join(dir, `${name}.html`), "utf-8"),
+    readFile(join(dir, `${name}.css`), "utf-8"),
+    readFile(join(dir, `${name}.js`), "utf-8"),
+  ]);
+  return { html, css, js };
 }
 
-// ─── Template: Stories Bar ───────────────────────────────────────────────────
-// Unique top-level folders act as "collections" — replaces IG's author stories.
+async function bundleComponent(name) {
+  const { html, css, js } = await loadComponentSources(name);
+  const libSrc = await readFile(join(__dirname, "src/lib/template.js"), "utf-8");
 
-function storiesBar(posts) {
+  // Self-contained ESM bundle:
+  //   1. inline the template helper (strip its `export`s — they become local)
+  //   2. drop the component's `import { ... } from '../../lib/template.js'`
+  //   3. replace the "__TEMPLATE__" / "__STYLES__" sentinels with file
+  //      contents, JSON.stringify'd for proper escape handling
+  const libInlined = libSrc.replace(/^export\s+/gm, "");
+  const jsNoImport = js.replace(
+    /^import\s+\{[^}]*\}\s+from\s+["'][^"']+["'];?\s*\n/gm, "");
+  const bundle =
+    `// Auto-generated by build.js — do not edit. Source: src/components/${name}/\n\n` +
+    libInlined + "\n" + jsNoImport
+      .replace(/"__TEMPLATE__"/g, JSON.stringify(html))
+      .replace(/"__STYLES__"/g, JSON.stringify(css));
+
+  await mkdir(join(OUT_DIR, "components"), { recursive: true });
+  await writeFile(join(OUT_DIR, "components", `${name}.js`), bundle);
+  console.log(`  wrote components/${name}.js`);
+}
+
+// Loaded once per build.js invocation. Each `node build.js` call re-reads, so
+// edits to component files are picked up by the next rebuild.
+const VIG_CARD = await loadComponentSources("vig-card");
+const VIG_HOT_SHOTS = await loadComponentSources("vig-hot-shots");
+const VIG_STORIES_BAR = await loadComponentSources("vig-stories-bar");
+const VIG_STORY = await loadComponentSources("vig-story");
+const VIG_VIEW_TOGGLE = await loadComponentSources("vig-view-toggle");
+const VIG_DETAIL = await loadComponentSources("vig-detail");
+const VIG_NAV_TOP = await loadComponentSources("vig-nav-top");
+const VIG_NAV_BOTTOM = await loadComponentSources("vig-nav-bottom");
+const VIG_GALLERY_GRID = await loadComponentSources("vig-gallery-grid");
+
+// Drives both bundleComponent() loop and the page-script injection.
+// Order matters only for predictable script-tag order in the HTML head.
+const FEED_COMPONENTS = [
+  "vig-card",
+  "vig-hot-shots",
+  "vig-stories-bar",
+  "vig-story",
+  "vig-view-toggle",
+  "vig-nav-top",
+  "vig-nav-bottom",
+  "vig-gallery-grid",
+];
+const DETAIL_COMPONENTS = ["vig-detail"];
+const ALL_COMPONENTS = [...new Set([...FEED_COMPONENTS, ...DETAIL_COMPONENTS])];
+
+// Page templates (markup-only files) — same lazy-load pattern as components.
+const LAYOUT_TPL = await readFile(join(__dirname, "src/pages/_layout.html"), "utf-8");
+const FEED_TPL = await readFile(join(__dirname, "src/pages/feed.html"), "utf-8");
+const FEED_EMPTY_TPL = await readFile(join(__dirname, "src/pages/feed-empty.html"), "utf-8");
+const DETAIL_TPL = await readFile(join(__dirname, "src/pages/detail.html"), "utf-8");
+
+// Common helper: wrap a component's inner shadow + slotted children into the
+// SSR'd Declarative Shadow DOM markup. Saves repeating the boilerplate in
+// every renderVigX() function.
+function declarativeShadow(tag, attrs, comp, innerShadow, lightChildren = "") {
+  const attrStr = Object.entries(attrs)
+    .filter(([, v]) => v != null && v !== false)
+    .map(([k, v]) => v === true ? k : `${k}="${escapeHtml(v)}"`)
+    .join(" ");
+  return `<${tag}${attrStr ? " " + attrStr : ""}>
+    <template shadowrootmode="open">
+      <style>${comp.css}</style>
+      ${innerShadow}
+    </template>
+    ${lightChildren}
+  </${tag}>`;
+}
+
+// ─── <vig-hot-shots> SSR ─────────────────────────────────────────────────────
+// Cycling preview <video> with viewport-autoplay and href-syncing — see the
+// component class for runtime behaviour. Server-rendered with the poster baked
+// into the shadow <video> so the very first paint already shows the still.
+function renderVigHotShots(post, variant) {
+  const innerShadow = renderTemplate(VIG_HOT_SHOTS.html, {
+    poster: `post/${post.slug}/poster.jpg`,
+  });
+  const starts = post.previewPlan ? post.previewPlan.ranges.map((r) => r.start) : [];
+  const cums = previewCums(post.previewPlan);
+  return declarativeShadow("vig-hot-shots", {
+    variant,
+    base: `post/${post.slug}`,
+    starts: starts.map((s) => s.toFixed(2)).join(","),
+    cums: cums.map((c) => c.toFixed(2)).join(","),
+    "aria-label": post.title,
+  }, VIG_HOT_SHOTS, innerShadow);
+}
+
+// ─── <vig-card> SSR ──────────────────────────────────────────────────────────
+// Chrome (header, caption, meta) in the shadow root; wrapping
+// <a class="post-media-link"> slotted from light DOM so the <vig-hot-shots>
+// inside can resolve closest('a') for href syncing.
+function renderVigCard(post) {
+  const folder = folderLabel(post.folder);
+  const href = `post/${post.slug}/index.html`;
+  const innerShadow = renderTemplate(VIG_CARD.html, {
+    href,
+    folder,
+    folderInitial: folderInitial(post.folder),
+    timeAgo: timeAgo(post.mtime),
+    title: post.title,
+    size: formatBytes(post.size),
+  });
+  const mediaInner = post.hasThumb
+    ? renderVigHotShots(post, "feed")
+    : `<div class="post-media no-media"><div class="grid-placeholder">${escapeHtml(folderInitial(post.folder))}</div></div>`;
+  const slottedMedia = `<a slot="media" class="post-media-link" href="${href}">${mediaInner}</a>`;
+  return declarativeShadow("vig-card", {}, VIG_CARD, innerShadow, slottedMedia);
+}
+
+// ─── <vig-story> SSR ─────────────────────────────────────────────────────────
+
+function renderVigStory(c) {
+  const innerShadow = renderTemplate(VIG_STORY.html, c);
+  return declarativeShadow("vig-story", {
+    href: c.href,
+    initial: c.initial,
+    display: c.display,
+  }, VIG_STORY, innerShadow);
+}
+
+// ─── <vig-stories-bar> SSR ───────────────────────────────────────────────────
+// Each collection avatar is its own <vig-story> child (slotted in light DOM)
+// so the bar stays pure layout. Empty when no collections (e.g. zero posts).
+function renderVigStoriesBar(posts) {
   const seen = new Set();
   const collections = [];
   for (const p of posts) {
     const top = p.folder ? p.folder.split("/")[0] : "root";
-    if (!seen.has(top)) {
-      seen.add(top);
-      collections.push({ label: top, firstSlug: p.slug });
-    }
+    if (seen.has(top)) continue;
+    seen.add(top);
+    collections.push({
+      href: `post/${p.slug}/index.html`,
+      display: top.length > 10 ? top.slice(0, 9) + "…" : top,
+      initial: top[0]?.toUpperCase() || "?",
+    });
   }
+  if (collections.length === 0) return "";
 
-  const items = collections
-    .map((c) => {
-      const display = c.label.length > 10 ? c.label.slice(0, 9) + "…" : c.label;
-      const initial = c.label[0]?.toUpperCase() || "?";
-      return `
-      <a href="post/${c.firstSlug}/index.html" class="story-item">
-        <div class="story-ring">
-          <div class="story-avatar-placeholder">${escapeHtml(initial)}</div>
-        </div>
-        <span class="story-username">${escapeHtml(display)}</span>
-      </a>`;
-    })
-    .join("");
-
-  return `<div class="stories-bar">${items}</div>`;
+  const stories = collections.map(renderVigStory).join("\n");
+  const innerShadow = renderTemplate(VIG_STORIES_BAR.html, {});
+  return declarativeShadow("vig-stories-bar", {}, VIG_STORIES_BAR, innerShadow, stories);
 }
 
-// ─── Template: View Toggle ───────────────────────────────────────────────────
-
-function viewToggle() {
-  return `
-  <div class="view-toggle">
-    <button class="toggle-btn" data-class-active="!$gallery" data-on-click="$gallery = false">
+// ─── <vig-view-toggle> SSR ───────────────────────────────────────────────────
+// Buttons are slotted in light DOM so Datastar's data-on-click and
+// data-class-active continue to work — Datastar's MutationObserver doesn't
+// scan into shadow roots, so anything reactive must stay in light DOM.
+function renderVigViewToggle() {
+  const innerShadow = renderTemplate(VIG_VIEW_TOGGLE.html, {});
+  const buttons = `
+    <button slot="feed" class="toggle-btn" data-class-active="!$gallery" data-on-click="$gallery = false">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
     </button>
-    <button class="toggle-btn" data-class-active="$gallery" data-on-click="$gallery = true">
+    <button slot="grid" class="toggle-btn" data-class-active="$gallery" data-on-click="$gallery = true">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M3 3h7v7H3zm0 11h7v7H3zm11-11h7v7h-7zm0 11h7v7h-7z"/></svg>
-    </button>
-  </div>`;
+    </button>`;
+  return declarativeShadow("vig-view-toggle", {}, VIG_VIEW_TOGGLE, innerShadow, buttons);
 }
 
-// ─── Template: Feed Card ─────────────────────────────────────────────────────
-
-function feedCard(post, index) {
-  const folder = folderLabel(post.folder);
-  const starts = post.previewPlan ? post.previewPlan.ranges.map((r) => r.start) : [];
-  const cums = previewCums(post.previewPlan);
-  const mediaHtml = post.hasThumb
-    ? hotShots(`post/${post.slug}`, post.title, "feed", post.previewCount || 1, starts, cums)
-    : `<div class="post-media no-media"><div class="grid-placeholder">${escapeHtml(folderInitial(post.folder))}</div></div>`;
-
-  return `
-  <article class="post-card">
-    <!-- Header -->
-    <a href="post/${post.slug}/index.html" class="post-header">
-      <div class="avatar-sm">${escapeHtml(folderInitial(post.folder))}</div>
-      <div class="post-header-info">
-        <span class="username">${escapeHtml(folder)}</span>
-        <span class="post-time">${timeAgo(post.mtime)}</span>
-      </div>
-      <span class="post-menu">•••</span>
-    </a>
-
-    <!-- Media -->
-    <a href="post/${post.slug}/index.html" class="post-media-link">
-      ${mediaHtml}
-    </a>
-
-    <!-- Title (filename) -->
-    <div class="post-caption">
-      <span class="username">${escapeHtml(folder)}</span>
-      <span>${escapeHtml(post.title)}</span>
-    </div>
-
-    <!-- Meta -->
-    <div class="post-meta-inline">
-      <span>${formatBytes(post.size)}</span>
-    </div>
-  </article>`;
+// ─── <vig-detail> SSR ────────────────────────────────────────────────────────
+// Layout shell wrapping a single <vig-player>. Provides the full-viewport
+// black backdrop that used to live in the .vig-detail global CSS rule.
+function renderVigDetail(slottedContent) {
+  const innerShadow = renderTemplate(VIG_DETAIL.html, {});
+  return declarativeShadow("vig-detail", {}, VIG_DETAIL, innerShadow, slottedContent);
 }
 
-// Hot-shots preview. Every card is a <video> with a poster; JS plays the first
-// clip when the card enters the viewport (or on hover) and switches src to cycle
-// through NN.mp4. Single-clip cards loop natively via video.loop in JS.
-// `starts` is the list of clip start-seconds in the source video — the JS writes
-// the current start onto the wrapping <a href> as ?t=<seconds> so clicking
-// jumps to that moment on the detail page.
-function hotShots(baseUrl, title, variant, count, starts = [], cums = []) {
-  const poster = `${baseUrl}/poster.jpg`;
-  const startsAttr = starts.map((s) => s.toFixed(2)).join(",");
-  const cumsAttr = cums.map((s) => s.toFixed(2)).join(",");
-  // The video element starts WITHOUT a src — only the poster is shown.
-  // setupClipCycle attaches the src on viewport entry and clears it again
-  // on exit (via removeAttribute + load()) to free the decoder context.
-  // Keeps memory bounded for big galleries — 127 always-loaded <video>
-  // elements with preload="metadata" easily blow past Safari's tab limit.
-  return `<div class="hot-shots hot-shots-${variant}"
-              data-hot-shots="${baseUrl}"
-              data-hot-shots-count="${count}"
-              data-hot-shots-starts="${startsAttr}"
-              data-hot-shots-cums="${cumsAttr}"
-              aria-label="${escapeHtml(title)}">
-    <video class="hot-shots-video"
-           poster="${poster}"
-           playsinline preload="none" muted loop></video>
-  </div>`;
+// ─── <vig-nav-top> / <vig-nav-bottom> SSR ────────────────────────────────────
+
+function renderVigNavTop({ homeHref = "index.html" } = {}) {
+  const innerShadow = renderTemplate(VIG_NAV_TOP.html, { homeHref });
+  return declarativeShadow("vig-nav-top", { "home-href": homeHref }, VIG_NAV_TOP, innerShadow);
+}
+
+function renderVigNavBottom({ homeHref = "index.html", active = "home" } = {}) {
+  const innerShadow = renderTemplate(VIG_NAV_BOTTOM.html, {
+    homeHref,
+    homeActive: active === "home" ? "active" : "",
+  });
+  return declarativeShadow("vig-nav-bottom", {
+    "home-href": homeHref,
+    active,
+  }, VIG_NAV_BOTTOM, innerShadow);
+}
+
+// ─── <vig-gallery-grid> SSR ──────────────────────────────────────────────────
+// Layout shell — cells are passed as a pre-rendered slotted-children string
+// so the existing build-time hashing (1×1, 1×2, 2×2) stays pure JS.
+function renderVigGalleryGrid(cellsHtml) {
+  const innerShadow = renderTemplate(VIG_GALLERY_GRID.html, {});
+  return declarativeShadow("vig-gallery-grid", {}, VIG_GALLERY_GRID, innerShadow, cellsHtml);
 }
 
 // ─── Template: Detail Page ───────────────────────────────────────────────────
@@ -1183,11 +1134,7 @@ function detailPage(post) {
   // Safe-for-inline JSON: escape </ so a shot label can never close the <script> tag.
   const initialShotsJson = JSON.stringify(post.shots || []).replace(/</g, "\\u003c");
 
-  return shell(
-    `${post.title} — vig`,
-    `
-    <main class="vig-detail">
-      <vig-player
+  const player = `<vig-player
         src="${src}"
         ${poster ? `poster="${poster}"` : ""}
         center-action="back"
@@ -1196,23 +1143,26 @@ function detailPage(post) {
         muted
         data-slug="${post.slug}">
         <script type="application/json" slot="shots">${initialShotsJson}</script>
-      </vig-player>
-    </main>
-    <script type="module" src="../../vig-player.js${globalThis.__vigPlayerVersion ? `?v=${globalThis.__vigPlayerVersion}` : ""}"></script>`,
-    { isDetail: true }
+      </vig-player>`;
+
+  const vigPlayerSrc = `../../vig-player.js${globalThis.__vigPlayerVersion ? `?v=${globalThis.__vigPlayerVersion}` : ""}`;
+
+  return shell(
+    `${post.title} — vig`,
+    renderTemplate(DETAIL_TPL, {
+      vigDetail: renderVigDetail(player),
+      vigPlayerSrc,
+    }),
+    { isDetail: true, components: DETAIL_COMPONENTS }
   );
 }
 
-// ─── Template: Gallery Grid ──────────────────────────────────────────────────
-
-function galleryGrid(posts) {
-  // Three cell sizes for visual rhythm in a max-3-col grid:
-  //   - Vertical (h > w):                       1 col × 2 rows  (portrait)
-  //   - Horizontal w/ slugHash%8 == 0 (~12%):   2 cols × 2 rows (big square)
-  //   - Other horizontal:                       1 col × 1 row   (small square)
-  // Hash is deterministic on slug so the same video always gets the same shape.
-  // grid-auto-flow: dense (set on the container) packs the mix efficiently.
-  const cells = posts
+// ─── Template: Gallery Grid (cells) ──────────────────────────────────────────
+// Builds the slotted children for <vig-gallery-grid>. Per-cell hashing
+// (1×1, 1×2, 2×2) stays here as build-time logic — the component just lays
+// the cells out.
+function galleryCells(posts) {
+  return posts
     .map((post) => {
       const isVertical = post.dimensions && post.dimensions.h > post.dimensions.w;
       const isBig = !isVertical && (slugHash(post.slug) % 8 === 0);
@@ -1220,10 +1170,8 @@ function galleryGrid(posts) {
       if (isVertical) spanStyle = ' style="grid-row: span 2"';
       else if (isBig) spanStyle = ' style="grid-column: span 2; grid-row: span 2"';
 
-      const starts = post.previewPlan ? post.previewPlan.ranges.map((r) => r.start) : [];
-      const cums = previewCums(post.previewPlan);
       const thumb = post.hasThumb
-        ? hotShots(`post/${post.slug}`, post.title, "grid", post.previewCount || 1, starts, cums)
+        ? renderVigHotShots(post, "grid")
         : `<div class="grid-placeholder">${escapeHtml(folderInitial(post.folder))}</div>`;
       return `
       <a href="post/${post.slug}/index.html" class="grid-cell"${spanStyle}>
@@ -1234,50 +1182,27 @@ function galleryGrid(posts) {
       </a>`;
     })
     .join("");
-
-  return `<div class="gallery-grid">${cells}</div>`;
 }
 
 // ─── Template: Feed (index.html) ─────────────────────────────────────────────
 
 function feedPage(posts) {
   if (posts.length === 0) {
-    return shell(
-      "vig",
-      `
-      ${navBar()}
-      <main class="feed empty-state">
-        <div class="empty-inner">
-          <svg viewBox="0 0 24 24" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.2">
-            <polygon points="23 7 16 12 23 17 23 7"/>
-            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
-          </svg>
-          <h2>No videos yet</h2>
-          <p>Drop <code>.mp4</code>, <code>.mov</code>, <code>.webm</code>, or <code>.m4v</code> files into the <code>${CONTENT_DIR}/</code> folder (nested folders are fine) and rebuild.</p>
-        </div>
-      </main>
-      ${navBottom(false)}`
-    );
+    return shell("vig", renderTemplate(FEED_EMPTY_TPL, {
+      navBar: renderVigNavTop(),
+      navBottom: renderVigNavBottom(),
+      contentDir: CONTENT_DIR,
+    }), { components: ["vig-nav-top", "vig-nav-bottom"] });
   }
 
-  const cards = posts.map((p, i) => feedCard(p, i)).join("\n");
-
-  return shell(
-    "vig",
-    `
-    <div data-signals-gallery="false">
-    ${navBar()}
-    ${storiesBar(posts)}
-    ${viewToggle()}
-    <main class="feed" data-show="!$gallery">
-      ${cards}
-    </main>
-    <main class="gallery-main" data-show="$gallery">
-      ${galleryGrid(posts)}
-    </main>
-    </div>
-    ${navBottom(false)}`
-  );
+  return shell("vig", renderTemplate(FEED_TPL, {
+    navBar: renderVigNavTop(),
+    storiesBar: renderVigStoriesBar(posts),
+    viewToggle: renderVigViewToggle(),
+    cards: posts.map(renderVigCard).join("\n"),
+    grid: renderVigGalleryGrid(galleryCells(posts)),
+    navBottom: renderVigNavBottom(),
+  }), { components: FEED_COMPONENTS });
 }
 
 // ─── Build ───────────────────────────────────────────────────────────────────
@@ -1487,8 +1412,13 @@ async function build() {
   globalThis.__vigPlayerVersion = playerVersion;
 
   // 7. Write CSS
-  await writeFile(join(OUT_DIR, "style.css"), CSS);
+  await copyFile(join(__dirname, "src/style.css"), join(OUT_DIR, "style.css"));
   console.log("  wrote style.css");
+
+  // 7b. Bundle web components into _site/components/<name>.js
+  for (const name of ALL_COMPONENTS) {
+    await bundleComponent(name);
+  }
 
   // 8. Write feed page
   await writeFile(join(OUT_DIR, "index.html"), feedPage(posts));
@@ -1529,424 +1459,6 @@ async function build() {
   console.log(`\nDone. Built ${posts.length} post${posts.length === 1 ? "" : "s"} → ${OUT_DIR}/`);
 }
 
-// ─── CSS ─────────────────────────────────────────────────────────────────────
-
-const CSS = `/* vig — Video Gallery Styles (mirrors mig's dark IG-style theme) */
-:root {
-  --bg: #000;
-  --bg-card: #000;
-  --bg-elevated: #1a1a1a;
-  --text: #f5f5f5;
-  --text-secondary: #a8a8a8;
-  --text-tertiary: #737373;
-  --border: #262626;
-  --accent: #0095f6;
-  --white: #fff;
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --max-w: 470px;
-  --feed-card-max: 470px;
-  /* Grid has its own breakpoints — chrome (top nav, stories, view toggle,
-     bottom nav, feed) stays in the 470px mobile-app frame for a focused look,
-     while the grid breaks out to a cinematic content area on bigger viewports. */
-  --grid-cols: 2;
-  --nav-h: 54px;
-  --bottom-h: 50px;
-}
-
-/* Grid column count: max 3 wide. Cells get bigger on wider viewports rather
-   than more numerous — gives a less dense, more curated feel. */
-@media (min-width: 720px) { :root { --grid-cols: 3; } }
-
-* { margin: 0; padding: 0; box-sizing: border-box; }
-
-body {
-  font-family: var(--font);
-  background: var(--bg);
-  color: var(--text);
-  -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
-}
-
-a { color: inherit; text-decoration: none; }
-button { background: none; border: none; cursor: pointer; color: inherit; font: inherit; }
-img, video { display: block; width: 100%; height: auto; }
-
-/* ─── Top Nav ─────────────────────────────────────────── */
-.nav-top {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: var(--nav-h);
-  padding: 0 16px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-  max-width: var(--max-w);
-  margin: 0 auto;
-}
-.nav-logo { display: flex; align-items: center; gap: 8px; }
-.ig-logo { width: 28px; height: 28px; }
-.logo-text {
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.5px;
-  font-style: italic;
-}
-.nav-icons { display: flex; gap: 16px; color: var(--text); }
-.nav-icons svg { cursor: pointer; }
-
-/* ─── Stories Bar ─────────────────────────────────────── */
-.stories-bar {
-  display: flex;
-  gap: 16px;
-  padding: 12px 16px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  border-bottom: 1px solid var(--border);
-  max-width: var(--max-w);
-  margin: 0 auto;
-}
-.stories-bar::-webkit-scrollbar { display: none; }
-.story-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-.story-ring {
-  width: 62px;
-  height: 62px;
-  border-radius: 50%;
-  background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888);
-  padding: 2px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.story-ring img,
-.story-ring .story-avatar-placeholder {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  border: 3px solid var(--bg);
-  object-fit: cover;
-}
-.story-avatar-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-elevated);
-  color: var(--text);
-  font-weight: 600;
-  font-size: 20px;
-}
-.story-username {
-  font-size: 11px;
-  color: var(--text);
-  max-width: 64px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: center;
-}
-
-/* ─── Feed ────────────────────────────────────────────── */
-.feed {
-  max-width: var(--max-w);
-  margin: 0 auto;
-  padding-bottom: calc(var(--bottom-h) + 20px);
-}
-
-/* ─── Post Card ───────────────────────────────────────── */
-/* Cards stay narrow even when .feed grows on desktop — keeps 9:16 portrait
-   videos at a watchable size instead of dominating the viewport. */
-.post-card {
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 12px;
-  margin: 0 auto 4px;
-  max-width: var(--feed-card-max);
-}
-.post-header {
-  display: flex;
-  align-items: center;
-  padding: 10px 12px;
-  gap: 10px;
-}
-.avatar-sm {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 13px;
-  flex-shrink: 0;
-  color: var(--text);
-}
-.post-header-info {
-  flex: 1;
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-}
-.username {
-  font-weight: 600;
-  font-size: 13px;
-}
-.post-time {
-  font-size: 12px;
-  color: var(--text-tertiary);
-}
-.post-menu {
-  font-size: 16px;
-  letter-spacing: 2px;
-  color: var(--text);
-}
-
-/* ─── Media ───────────────────────────────────────────── */
-.post-media {
-  position: relative;
-  background: var(--bg-elevated);
-  max-height: 600px;
-  overflow: hidden;
-}
-.post-media img,
-.post-media video {
-  width: 100%;
-  max-height: 600px;
-  object-fit: contain;
-  background: #000;
-}
-
-/* ─── Hot-shots Preview ───────────────────────────────── */
-/* Card shape comes from CSS, not inline. Feed cards are uniformly 9:16 so
-   verticals fit naturally and horizontals get cropped to the same height.
-   Grid cells are square base-units, with verticals spanning two rows. */
-.hot-shots {
-  position: relative;
-  width: 100%;
-  background-color: #000;
-  cursor: pointer;
-  overflow: hidden;
-}
-.hot-shots-feed {
-  aspect-ratio: 9 / 16;
-}
-.hot-shots-grid {
-  width: 100%;
-  height: 100%;
-}
-.hot-shots-video {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;   /* horizontals crop into 9:16; verticals fit perfectly */
-  display: block;
-}
-/* ─── Caption / Title ─────────────────────────────────── */
-.post-caption {
-  padding: 8px 12px 0;
-  font-size: 14px;
-  line-height: 1.4;
-}
-.post-caption .username {
-  margin-right: 5px;
-}
-.post-meta-inline {
-  padding: 4px 12px 0;
-  font-size: 12px;
-  color: var(--text-tertiary);
-}
-
-/* ─── Bottom Nav ──────────────────────────────────────── */
-.nav-bottom {
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100%;
-  max-width: var(--max-w);
-  height: var(--bottom-h);
-  background: var(--bg);
-  border-top: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-around;
-  z-index: 100;
-}
-.nav-bottom-item {
-  color: var(--text);
-  opacity: 0.6;
-  transition: opacity 0.15s;
-}
-.nav-bottom-item.active { opacity: 1; }
-
-/* ─── Detail Page (vig-player host) ───────────────────── */
-.vig-detail {
-  position: fixed;
-  inset: 0;
-  background: #000;
-  z-index: 1;
-}
-.vig-detail vig-player {
-  width: 100%;
-  height: 100%;
-}
-
-/* ─── View Toggle ─────────────────────────────────────── */
-.view-toggle {
-  display: flex;
-  justify-content: center;
-  gap: 0;
-  max-width: var(--max-w);
-  margin: 0 auto;
-  border-bottom: 1px solid var(--border);
-}
-.toggle-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px 0;
-  color: var(--text-tertiary);
-  border-bottom: 1px solid transparent;
-  margin-bottom: -1px;
-  transition: color 0.2s, border-color 0.2s;
-}
-.toggle-btn.active {
-  color: var(--text);
-  border-bottom-color: var(--text);
-}
-
-/* ─── Gallery Grid ─────────────────────────────────────────────────── */
-/* Square base cell. Vertical → 1×2, horizontal → 2×1 (both natural shapes,
-   no crops). The grid lives in .gallery-main which is NOT capped at the
-   chrome's --max-w — so on desktop the grid spans the full browser window
-   while the chrome (top nav, stories, view toggle, bottom nav, feed) stays
-   in its 470px mobile-app frame. Minimal padding for true edge-to-edge feel.
-   dense packing backfills holes left by 2-col-wide horizontals. */
-.gallery-main {
-  width: 100%;
-  padding-bottom: calc(var(--bottom-h) + 24px);
-}
-.gallery-grid {
-  --grid-gap: 2px;
-  --grid-edge: 0px;
-  /* Cap kicks in on desktop only — below this the grid fills the viewport
-     edge-to-edge (iPad portrait, iPad landscape both look great full-width).
-     Above, we cap and centre so cells don't grow absurdly large. */
-  --grid-cap: 100vw;
-  display: grid;
-  grid-template-columns: repeat(var(--grid-cols), 1fr);
-  /* Row height = column width. Subtract a 17px fudge for the scrollbar so the
-     grid never overflows horizontally. min() lets the formula adapt to either
-     the viewport (mobile) or the cap (desktop). */
-  grid-auto-rows: calc(
-    (min(100vw, var(--grid-cap)) - 17px - 2 * var(--grid-edge) - (var(--grid-cols) - 1) * var(--grid-gap))
-    / var(--grid-cols)
-  );
-  grid-auto-flow: dense;
-  gap: var(--grid-gap);
-  width: 100%;
-  max-width: var(--grid-cap);
-  margin: 0 auto;
-  padding: 0 var(--grid-edge);
-}
-@media (min-width: 1100px) {
-  .gallery-grid { --grid-cap: 1100px; }
-}
-.grid-cell {
-  position: relative;
-  background: var(--bg-elevated);
-  overflow: hidden;
-}
-.grid-cell .grid-placeholder {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--text-tertiary);
-  background: var(--bg-elevated);
-}
-.grid-icon {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  filter: drop-shadow(0 1px 3px rgba(0,0,0,0.5));
-}
-.grid-overlay {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0) 50%);
-  display: flex;
-  align-items: flex-end;
-  padding: 8px;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.grid-cell:hover .grid-overlay { opacity: 1; }
-.grid-stat {
-  color: white;
-  font-weight: 600;
-  font-size: 11px;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  width: 100%;
-}
-
-/* ─── Empty State ─────────────────────────────────────── */
-.empty-state {
-  min-height: 60vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 40px 24px;
-}
-.empty-inner {
-  color: var(--text-secondary);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-.empty-inner svg { color: var(--text-tertiary); }
-.empty-inner h2 {
-  color: var(--text);
-  font-size: 20px;
-  font-weight: 600;
-  margin-top: 4px;
-}
-.empty-inner p { font-size: 14px; line-height: 1.5; max-width: 320px; }
-.empty-inner code {
-  background: var(--bg-elevated);
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 12px;
-}
-
-/* ─── Responsive ──────────────────────────────────────── */
-@media (min-width: 480px) {
-  /* Mobile-app frame outline for the chrome and feed — NOT the grid, which
-     breaks out to full browser width. */
-  .feed, .detail-page, .nav-top, .stories-bar, .view-toggle {
-    border-left: 1px solid var(--border);
-    border-right: 1px solid var(--border);
-  }
-}
-`;
 
 // ─── Run ─────────────────────────────────────────────────────────────────────
 build().catch((err) => {

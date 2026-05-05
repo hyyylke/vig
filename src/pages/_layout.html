@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>{{title}}</title>
+  <link rel="stylesheet" href="{{cssHref}}">
+  <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-beta.11/bundles/datastar.js"></script>
+  {{#each componentScripts}}<script type="module" src="{{this}}"></script>
+  {{/each}}
+</head>
+<body>
+  {{{body}}}
+  {{{footerScripts}}}
+</body>
+</html>

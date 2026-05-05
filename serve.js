@@ -27,6 +27,14 @@ const META_ROOT = resolve(process.env.VIG_META || join(STATIC_ROOT, "meta"));
 // so the API can't be tricked into reading/writing outside the meta tree.
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,79}$/;
 
+// OSC 8 hyperlink escape — supported by iTerm2, Terminal.app, VS Code,
+// WezTerm, Kitty, Windows Terminal. Falls back to plain text in non-TTY
+// contexts (pipes, log files, CI) so we don't pollute output.
+function clickable(url, text = url) {
+  if (!process.stdout.isTTY) return text;
+  return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
+}
+
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -314,7 +322,7 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`vig: http://localhost:${PORT}`);
+  console.log(`vig: ${clickable(`http://localhost:${PORT}`)}`);
   console.log(`  static: ${STATIC_ROOT}`);
   console.log(`  videos: ${VIDEOS_ROOT}`);
   console.log(`  api:    /_api/shots?slug=<post-slug>  [GET | POST | PUT]`);
@@ -367,7 +375,19 @@ function setupWatch() {
     if (existsSync(playerPath)) {
       watch(playerPath, () => scheduleRebuild("vig-player.js"));
     }
-    console.log(`  watch:  ${VIDEOS_ROOT}, build.js, vig-player.js  (auto-rebuild on changes)`);
+    // Component sources (src/components/<name>/{html,css,js}) and the shared
+    // template helper (src/lib/template.js) — both are read fresh on each
+    // build, so any edit should kick off a rebuild during `npm run dev`.
+    const srcPath = join(__dirname, "src");
+    if (existsSync(srcPath)) {
+      watch(srcPath, { recursive: true }, (event, filename) => {
+        if (!filename) return;
+        if (!/\.(html|css|js)$/.test(filename)) return;
+        if (filename.split(/[/\\]/).some((s) => s.startsWith("."))) return;
+        scheduleRebuild(`src/${filename}`);
+      });
+    }
+    console.log(`  watch:  ${VIDEOS_ROOT}, build.js, vig-player.js, src/  (auto-rebuild on changes)`);
   } catch (err) {
     console.warn(`[watch] could not set up watchers: ${err.message}`);
   }

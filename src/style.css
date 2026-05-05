@@ -1,0 +1,148 @@
+/* vig — Video Gallery Styles (mirrors mig's dark IG-style theme) */
+:root {
+  --bg: #000;
+  --bg-card: #000;
+  --bg-elevated: #1a1a1a;
+  --text: #f5f5f5;
+  --text-secondary: #a8a8a8;
+  --text-tertiary: #737373;
+  --border: #262626;
+  --accent: #0095f6;
+  --white: #fff;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --max-w: 470px;
+  --feed-card-max: 470px;
+  /* Grid has its own breakpoints — chrome (top nav, stories, view toggle,
+     bottom nav, feed) stays in the 470px mobile-app frame for a focused look,
+     while the grid breaks out to a cinematic content area on bigger viewports. */
+  --grid-cols: 2;
+  --nav-h: 54px;
+  --bottom-h: 50px;
+}
+
+/* Grid column count: max 3 wide. Cells get bigger on wider viewports rather
+   than more numerous — gives a less dense, more curated feel. */
+@media (min-width: 720px) { :root { --grid-cols: 3; } }
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+a { color: inherit; text-decoration: none; }
+button { background: none; border: none; cursor: pointer; color: inherit; font: inherit; }
+img, video { display: block; width: 100%; height: auto; }
+
+/* Light-DOM utility rules below. Component-internal styles live in
+   src/components/<name>/<name>.css and are scoped to their shadow root. */
+
+/* ─── Feed ────────────────────────────────────────────── */
+.feed {
+  max-width: var(--max-w);
+  margin: 0 auto;
+  padding-bottom: calc(var(--bottom-h) + 20px);
+}
+
+@media (min-width: 480px) {
+  /* Mobile-app frame outline — components apply their own :host border. */
+  .feed {
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
+}
+
+/* ─── No-thumb fallback ───────────────────────────────── */
+/* Used by <vig-card> when a post has no preview thumbnail. Lives in light DOM
+   (slotted into vig-card's "media" slot), so styles can't be inside shadow. */
+.post-media {
+  position: relative;
+  background: var(--bg-elevated);
+  max-height: 600px;
+  overflow: hidden;
+}
+.post-media img,
+.post-media video {
+  width: 100%;
+  max-height: 600px;
+  object-fit: contain;
+  background: #000;
+}
+
+/* ─── Grid Cells (light DOM, slotted into <vig-gallery-grid>) ──────── */
+/* The grid CONTAINER lives in vig-gallery-grid's shadow CSS. The CELLS are
+   slotted children, and their inner markup (.grid-overlay, .grid-stat,
+   .grid-placeholder) is descendants of the slotted root — out of reach of
+   shadow ::slotted() — so cell styles stay light-DOM. */
+.grid-cell {
+  position: relative;
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+.grid-cell .grid-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  background: var(--bg-elevated);
+}
+.grid-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0) 50%);
+  display: flex;
+  align-items: flex-end;
+  padding: 8px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.grid-cell:hover .grid-overlay { opacity: 1; }
+.grid-stat {
+  color: white;
+  font-weight: 600;
+  font-size: 11px;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+/* ─── Empty State ─────────────────────────────────────── */
+.empty-state {
+  min-height: 60vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px 24px;
+}
+.empty-inner {
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.empty-inner svg { color: var(--text-tertiary); }
+.empty-inner h2 {
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+.empty-inner p { font-size: 14px; line-height: 1.5; max-width: 320px; }
+.empty-inner code {
+  background: var(--bg-elevated);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}

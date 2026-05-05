@@ -1,0 +1,41 @@
+/* Square base cell. Vertical → 1×2, horizontal → 2×1 (both natural shapes,
+   no crops). The grid is NOT capped at the chrome's --max-w — on desktop it
+   spans up to 1100px so cells don't grow absurdly large. dense packing
+   backfills holes left by 2-col-wide horizontals.
+
+   Cell internals (.grid-cell, .grid-overlay, .grid-stat, .grid-placeholder)
+   stay in light DOM with their rules in src/style.css, because slotted
+   children's descendants can't be reached from shadow CSS. */
+
+:host {
+  display: block;
+  width: 100%;
+  padding-bottom: calc(var(--bottom-h) + 24px);
+}
+
+.grid {
+  --grid-gap: 2px;
+  --grid-edge: 0px;
+  /* Cap kicks in on desktop only — below this the grid fills the viewport
+     edge-to-edge (iPad portrait, iPad landscape both look great full-width). */
+  --grid-cap: 100vw;
+  display: grid;
+  grid-template-columns: repeat(var(--grid-cols), 1fr);
+  /* Row height = column width. Subtract a 17px fudge for the scrollbar so
+     the grid never overflows horizontally. min() lets the formula adapt to
+     either the viewport (mobile) or the cap (desktop). */
+  grid-auto-rows: calc(
+    (min(100vw, var(--grid-cap)) - 17px - 2 * var(--grid-edge) - (var(--grid-cols) - 1) * var(--grid-gap))
+    / var(--grid-cols)
+  );
+  grid-auto-flow: dense;
+  gap: var(--grid-gap);
+  width: 100%;
+  max-width: var(--grid-cap);
+  margin: 0 auto;
+  padding: 0 var(--grid-edge);
+}
+
+@media (min-width: 1100px) {
+  .grid { --grid-cap: 1100px; }
+}
