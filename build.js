@@ -964,6 +964,7 @@ const VIG_DETAIL = await loadComponentSources("vig-detail");
 const VIG_NAV_TOP = await loadComponentSources("vig-nav-top");
 const VIG_NAV_BOTTOM = await loadComponentSources("vig-nav-bottom");
 const VIG_GALLERY_GRID = await loadComponentSources("vig-gallery-grid");
+const VIG_FEED_SECTION = await loadComponentSources("vig-feed-section");
 
 // Drives both bundleComponent() loop and the page-script injection.
 // Order matters only for predictable script-tag order in the HTML head.
@@ -976,6 +977,7 @@ const FEED_COMPONENTS = [
   "vig-nav-top",
   "vig-nav-bottom",
   "vig-gallery-grid",
+  "vig-feed-section",
 ];
 const DETAIL_COMPONENTS = ["vig-detail"];
 const ALL_COMPONENTS = [...new Set([...FEED_COMPONENTS, ...DETAIL_COMPONENTS])];
@@ -1128,6 +1130,19 @@ function renderVigGalleryGrid(cellsHtml) {
   return declarativeShadow("vig-gallery-grid", {}, VIG_GALLERY_GRID, innerShadow, cellsHtml);
 }
 
+// ─── <vig-feed-section> SSR ──────────────────────────────────────────────────
+// One vertical group in the feed per folder. Cards are slotted in light DOM.
+function renderVigFeedSection({ folder, display, count }, slottedCards) {
+  const innerShadow = renderTemplate(VIG_FEED_SECTION.html, { display, count });
+  return declarativeShadow(
+    "vig-feed-section",
+    { folder, display, count },
+    VIG_FEED_SECTION,
+    innerShadow,
+    slottedCards,
+  );
+}
+
 // ─── Template: Detail Page ───────────────────────────────────────────────────
 
 function detailPage(post) {
@@ -1188,6 +1203,37 @@ function galleryCells(posts) {
 
 // ─── Template: Feed (index.html) ─────────────────────────────────────────────
 
+// Group posts by folder, render each group as a <vig-feed-section> with the
+// folder's cards slotted inside. Subfolders are independent groups (no
+// nesting). Group order = newest post in the group first, so a folder with
+// recent activity bubbles up.
+function feedSections(posts) {
+  const groups = new Map();
+  for (const post of posts) {
+    const key = post.folder || "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(post);
+  }
+
+  const ordered = Array.from(groups.entries())
+    .map(([folder, list]) => ({
+      folder,
+      display: folder || "root",
+      count: list.length,
+      // posts are already mtime-desc sorted upstream → first item is newest
+      newestMtime: list[0].mtime,
+      list,
+    }))
+    .sort((a, b) => new Date(b.newestMtime) - new Date(a.newestMtime));
+
+  return ordered
+    .map(({ folder, display, count, list }) => {
+      const cards = list.map(renderVigCard).join("\n");
+      return renderVigFeedSection({ folder, display, count }, cards);
+    })
+    .join("\n");
+}
+
 function feedPage(posts) {
   if (posts.length === 0) {
     return shell("vig", renderTemplate(FEED_EMPTY_TPL, {
@@ -1201,7 +1247,7 @@ function feedPage(posts) {
     navBar: renderVigNavTop(),
     storiesBar: renderVigStoriesBar(posts),
     viewToggle: renderVigViewToggle(),
-    cards: posts.map(renderVigCard).join("\n"),
+    cards: feedSections(posts),
     grid: renderVigGalleryGrid(galleryCells(posts)),
     navBottom: renderVigNavBottom(),
   }), { components: FEED_COMPONENTS });
