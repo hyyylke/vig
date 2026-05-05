@@ -437,13 +437,20 @@ return declarativeShadow("vig-x", {}, VIG_X, innerShadow, `
 - **`closest('a')` van binnen shadow DOM**: vindt niets als de `<a>` ook
   in een ander shadow root zit. Slot het `<a>` in light DOM als je naar
   ancestors moet kijken.
-- **`:host` met `position: sticky` + `max-width` + `margin: 0 auto`**: in
-  sommige render engines werkt de combinatie niet — de host wordt
-  full-width links uitgelijnd in plaats van gecentreerd. Splits de
-  verantwoordelijkheden: laat `:host` de sticky-container zijn (full
-  width, transparante of body-matching bg) en zet het centreren
-  (`max-width` + `margin: 0 auto`) op een inner element. Zie
-  `vig-nav-top.css` voor het patroon.
+- **`:host { max-width + margin: 0 auto }` voor centering**: werkt NIET
+  zolang `src/style.css` een `* { margin: 0 }` reset bevat. Light-DOM CSS
+  reikt tot het host-element van een custom element (omdat de host zélf
+  in light DOM staat) én heeft hogere cascade-prioriteit dan `:host`
+  styles (document-author origin > shadow-tree origin). De `* { margin: 0
+  }` overruled dus `:host { margin: 0 auto }` en de host centreert niet.
+  Fix: zet `max-width` + `margin: 0 auto` (en eventueel `border-bottom`,
+  background, etc.) op een **inner element binnen de shadow root** in
+  plaats van op `:host`. Light-DOM CSS bereikt de inner shadow content
+  niet, dus daar werkt centering normaal. Voor sticky-componenten: laat
+  `:host` de full-width sticky container zijn (background matched body)
+  en centreer de visuele frame op het inner element. Zie
+  `vig-nav-top.css`, `vig-stories-bar.css`, en `vig-view-toggle.css` voor
+  het patroon.
 
 ## Ontwikkelen
 

@@ -1,12 +1,13 @@
-/* Horizontal-scrolling row that holds <vig-story> children. The host carries
-   the visible mobile-app-frame layout (max-width + side borders on desktop);
-   the inner .bar handles the scroll/flex behaviour. */
+/* Centering MUST live on the inner .bar (inside shadow DOM), not on :host.
+   The light-DOM `* { margin: 0 }` reset in style.css reaches the host
+   element and overrides any `:host { margin: 0 auto }` (document-author
+   origin > shadow-tree origin). Inside the shadow root, light-DOM CSS
+   doesn't reach, so .bar's margin:auto works as expected.
+
+   :host stays a transparent block; .bar carries the visible 470px frame. */
 
 :host {
   display: block;
-  max-width: var(--max-w);
-  margin: 0 auto;
-  border-bottom: 1px solid var(--border);
 }
 
 .bar {
@@ -15,12 +16,15 @@
   padding: 12px 16px;
   overflow-x: auto;
   scrollbar-width: none;
+  border-bottom: 1px solid var(--border);
+  max-width: var(--max-w);
+  margin: 0 auto;
 }
 
 .bar::-webkit-scrollbar { display: none; }
 
 @media (min-width: 480px) {
-  :host {
+  .bar {
     border-left: 1px solid var(--border);
     border-right: 1px solid var(--border);
   }
