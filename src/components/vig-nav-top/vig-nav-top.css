@@ -1,20 +1,18 @@
 /* :host is the sticky container — full-width so sticky's containing block is
-   the body's scroll port. The visible 470px column frame lives on .bar
-   inside, where max-width + margin:auto centers reliably.
+   the body's scroll port. Stays TRANSPARENT so on desktop the gallery grid
+   (which extends edge-to-edge) is visible past the centered 470px nav frame
+   when scrolling underneath. The visible frame lives entirely on .bar.
 
    Why centering must be on .bar, not :host: light-DOM `* { margin: 0 }` in
    style.css reaches the host element and overrides any `:host { margin: 0
    auto }` (document-author origin > shadow-tree origin). Inside the shadow
-   root, light-DOM CSS doesn't reach, so .bar's margin:auto works. The
-   :host background matches the body so the full-width sticky strip is
-   visually invisible outside the centered frame. */
+   root, light-DOM CSS doesn't reach, so .bar's margin:auto works. */
 
 :host {
   display: block;
   position: sticky;
   top: 0;
   z-index: 100;
-  background: var(--bg);
 }
 
 .bar {
@@ -25,6 +23,7 @@
   padding: 0 16px;
   max-width: var(--max-w);
   margin: 0 auto;
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
 
