@@ -1,6 +1,11 @@
-/* Sticky top bar with logo + icons. The :host carries the mobile-app-frame
-   layout (max-width + side borders on desktop) so the bar visually aligns
-   with .feed below. */
+/* :host is the sticky container — full-width so sticky's containing block is
+   the body's scroll port (a centered :host with max-width can't sit at the
+   top across the full viewport reliably; sticky + max-width + margin:auto on
+   :host fights itself in some engines).
+
+   The visible 470px column frame lives on .bar inside, where max-width +
+   margin:auto centers without any sticky interaction. The :host background
+   matches the body so the full-width strip is invisible outside the frame. */
 
 :host {
   display: block;
@@ -8,9 +13,6 @@
   top: 0;
   z-index: 100;
   background: var(--bg);
-  border-bottom: 1px solid var(--border);
-  max-width: var(--max-w);
-  margin: 0 auto;
 }
 
 .bar {
@@ -19,6 +21,9 @@
   justify-content: space-between;
   height: var(--nav-h);
   padding: 0 16px;
+  max-width: var(--max-w);
+  margin: 0 auto;
+  border-bottom: 1px solid var(--border);
 }
 
 .logo {
@@ -50,7 +55,7 @@
 .icons svg { cursor: pointer; }
 
 @media (min-width: 480px) {
-  :host {
+  .bar {
     border-left: 1px solid var(--border);
     border-right: 1px solid var(--border);
   }
