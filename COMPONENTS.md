@@ -437,6 +437,13 @@ return declarativeShadow("vig-x", {}, VIG_X, innerShadow, `
 - **`closest('a')` van binnen shadow DOM**: vindt niets als de `<a>` ook
   in een ander shadow root zit. Slot het `<a>` in light DOM als je naar
   ancestors moet kijken.
+- **`:host` met `position: sticky` + `max-width` + `margin: 0 auto`**: in
+  sommige render engines werkt de combinatie niet — de host wordt
+  full-width links uitgelijnd in plaats van gecentreerd. Splits de
+  verantwoordelijkheden: laat `:host` de sticky-container zijn (full
+  width, transparante of body-matching bg) en zet het centreren
+  (`max-width` + `margin: 0 auto`) op een inner element. Zie
+  `vig-nav-top.css` voor het patroon.
 
 ## Ontwikkelen
 
