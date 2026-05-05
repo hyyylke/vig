@@ -964,7 +964,6 @@ const VIG_DETAIL = await loadComponentSources("vig-detail");
 const VIG_NAV_TOP = await loadComponentSources("vig-nav-top");
 const VIG_NAV_BOTTOM = await loadComponentSources("vig-nav-bottom");
 const VIG_GALLERY_GRID = await loadComponentSources("vig-gallery-grid");
-const VIG_FOLDER_SECTION = await loadComponentSources("vig-folder-section");
 
 // Drives both bundleComponent() loop and the page-script injection.
 // Order matters only for predictable script-tag order in the HTML head.
@@ -977,7 +976,6 @@ const FEED_COMPONENTS = [
   "vig-nav-top",
   "vig-nav-bottom",
   "vig-gallery-grid",
-  "vig-folder-section",
 ];
 const DETAIL_COMPONENTS = ["vig-detail"];
 const ALL_COMPONENTS = [...new Set([...FEED_COMPONENTS, ...DETAIL_COMPONENTS])];
@@ -1130,52 +1128,6 @@ function renderVigGalleryGrid(cellsHtml) {
   return declarativeShadow("vig-gallery-grid", {}, VIG_GALLERY_GRID, innerShadow, cellsHtml);
 }
 
-// ─── <vig-folder-section> SSR ────────────────────────────────────────────────
-// One vertical group per folder, used in both feed and grid views. The
-// content (cards or a gallery-grid) is slotted in light DOM.
-function renderVigFolderSection({ folder, display, initial, count, variant }, slottedContent) {
-  const countLabel = count === 1 ? "video" : "videos";
-  const innerShadow = renderTemplate(VIG_FOLDER_SECTION.html, {
-    display, initial, count, countLabel,
-  });
-  return declarativeShadow(
-    "vig-folder-section",
-    {
-      folder,
-      display,
-      initial,
-      count,
-      "count-label": countLabel,
-      variant,
-    },
-    VIG_FOLDER_SECTION,
-    innerShadow,
-    slottedContent,
-  );
-}
-
-// Group posts by folder, sorted newest-first. Returned shape feeds both
-// feedSections() and gridSections().
-function groupPostsByFolder(posts) {
-  const groups = new Map();
-  for (const post of posts) {
-    const key = post.folder || "";
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(post);
-  }
-  return Array.from(groups.entries())
-    .map(([folder, list]) => ({
-      folder,
-      display: folder || "root",
-      initial: (folder || "root")[0]?.toUpperCase() || "?",
-      count: list.length,
-      // posts arrive already mtime-desc sorted → first item is newest
-      newestMtime: list[0].mtime,
-      list,
-    }))
-    .sort((a, b) => new Date(b.newestMtime) - new Date(a.newestMtime));
-}
-
 // ─── Template: Detail Page ───────────────────────────────────────────────────
 
 function detailPage(post) {
@@ -1236,29 +1188,6 @@ function galleryCells(posts) {
 
 // ─── Template: Feed (index.html) ─────────────────────────────────────────────
 
-// Render the feed (linear) view as one <vig-folder-section variant="feed">
-// per folder, with that folder's cards slotted inside.
-function feedSections(posts) {
-  return groupPostsByFolder(posts)
-    .map((g) => {
-      const cards = g.list.map(renderVigCard).join("\n");
-      return renderVigFolderSection({ ...g, variant: "feed" }, cards);
-    })
-    .join("\n");
-}
-
-// Render the gallery (grid) view as one <vig-folder-section variant="grid">
-// per folder, with that folder's posts in a dedicated <vig-gallery-grid>
-// slotted inside.
-function gridSections(posts) {
-  return groupPostsByFolder(posts)
-    .map((g) => {
-      const grid = renderVigGalleryGrid(galleryCells(g.list));
-      return renderVigFolderSection({ ...g, variant: "grid" }, grid);
-    })
-    .join("\n");
-}
-
 function feedPage(posts) {
   if (posts.length === 0) {
     return shell("vig", renderTemplate(FEED_EMPTY_TPL, {
@@ -1272,8 +1201,8 @@ function feedPage(posts) {
     navBar: renderVigNavTop(),
     storiesBar: renderVigStoriesBar(posts),
     viewToggle: renderVigViewToggle(),
-    cards: feedSections(posts),
-    grid: gridSections(posts),
+    cards: posts.map(renderVigCard).join("\n"),
+    grid: renderVigGalleryGrid(galleryCells(posts)),
     navBottom: renderVigNavBottom(),
   }), { components: FEED_COMPONENTS });
 }
