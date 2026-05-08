@@ -341,11 +341,18 @@ server.listen(PORT, () => {
 
 const VIDEO_FILE_RE = /\.(mp4|mov|webm|m4v)$/i;
 
+// Folders inside VIDEOS_ROOT that build.js itself writes to. Without this
+// filter, the build's own hardlinks/encodes (e.g. `_site/post/<slug>/video.mp4`)
+// fire watch events that re-trigger the build → infinite loop.
+const IGNORED_TOP_DIRS = new Set(["_site", ".vig", "node_modules"]);
+
 function isInterestingVideoEvent(filename) {
   if (!filename) return false;
-  // Reject paths containing any dot-prefixed segment (.DS_Store, ._meta, etc.).
   const segments = filename.split(/[/\\]/);
+  // Reject dot-prefixed segments (.DS_Store, ._meta, etc.).
   if (segments.some((s) => s.startsWith("."))) return false;
+  // Reject anything inside our own output / metadata trees.
+  if (IGNORED_TOP_DIRS.has(segments[0])) return false;
   return VIDEO_FILE_RE.test(filename);
 }
 

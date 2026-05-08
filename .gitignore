@@ -6,3 +6,12 @@ node_modules/
 # Ignore symlinks/folders the dev might drop in for local testing.
 dwhelper
 videos
+# Test videos dropped in the project root — vig is meant to be pointed at any
+# folder, so the dev sometimes drops loose .mp4/.mov files in the project root
+# itself for a quick test. These should never be tracked.
+*.mp4
+*.mov
+*.webm
+*.m4v
+# Lossless Cut project files (companion to user-edited videos)
+*.llc
