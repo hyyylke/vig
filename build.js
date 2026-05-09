@@ -6,8 +6,8 @@
  * a static site with a Datastar-powered feed + grid browser.
  */
 
-import { readdir, readFile, writeFile, mkdir, copyFile, symlink, link, lstat, rm, stat } from "fs/promises";
-import { join, extname, basename, dirname, relative, resolve, sep, posix } from "path";
+import { readdir, readFile, writeFile, mkdir, copyFile, symlink, readlink, link, lstat, rm, stat } from "fs/promises";
+import { join, extname, basename, dirname, relative, resolve, sep, posix, isAbsolute } from "path";
 import { existsSync } from "fs";
 import { spawn } from "child_process";
 import { createHash } from "crypto";
@@ -1317,10 +1317,11 @@ async function build() {
     }
   }
 
-  // 4. Hardlink each source video to its post's outDir as video.<ext>.
-  //    Hardlinks share inodes with the source — zero disk duplication, builds
-  //    are instant, and the files look like regular files to the static server
-  //    (unlike symlinks, which serve refuses when they point outside the root).
+  // 4. Link each source video to its post's outDir as video.<ext>.
+  //    Strategy: hardlink first (same filesystem, zero disk overhead, looks
+  //    like a regular file to the static server), and on failure (e.g. cross-
+  //    filesystem) fall back to an absolute symlink. We never copy — videos
+  //    are big and the source folder is the source of truth.
   //    Done in parallel: pure I/O, no reason to serialise.
   let linkDone = 0;
   const linkResults = await Promise.all(posts.map(async (post) => {
@@ -1332,12 +1333,25 @@ async function build() {
     await mkdir(post.outDir, { recursive: true });
     const destPath = join(post.outDir, post.videoFile);
 
+    // Up-to-date check — handle both hardlink (inode match) and symlink
+    // (link target match) without needing to recreate.
     try {
-      const [destStat, srcStat] = await Promise.all([lstat(destPath), stat(srcPath)]);
-      if (!destStat.isSymbolicLink() && destStat.ino === srcStat.ino) {
-        linkDone++; progress(`  linking media ${linkDone}/${posts.length}`);
-        return "skipped";
+      const destStat = await lstat(destPath);
+      if (destStat.isSymbolicLink()) {
+        const target = await readlink(destPath);
+        const resolved = isAbsolute(target) ? target : resolve(dirname(destPath), target);
+        if (resolved === srcPath) {
+          linkDone++; progress(`  linking media ${linkDone}/${posts.length}`);
+          return "skipped";
+        }
+      } else {
+        const srcStat = await stat(srcPath);
+        if (destStat.ino === srcStat.ino) {
+          linkDone++; progress(`  linking media ${linkDone}/${posts.length}`);
+          return "skipped";
+        }
       }
+      // Stale (different file, or wrong type) — remove and re-link.
       await rm(destPath, { force: true });
     } catch { /* doesn't exist — fine */ }
 
@@ -1346,20 +1360,30 @@ async function build() {
       linkDone++; progress(`  linking media ${linkDone}/${posts.length}`);
       return "linked";
     } catch {
-      await copyFile(srcPath, destPath);
-      linkDone++; progress(`  linking media ${linkDone}/${posts.length}`);
-      return "copied";
+      try {
+        // Cross-filesystem (or APFS firmlink edge case) — fall back to an
+        // absolute symlink. serve.js follows symlinks via stat() so this
+        // works fine for the dev server.
+        await symlink(srcPath, destPath);
+        linkDone++; progress(`  linking media ${linkDone}/${posts.length}`);
+        return "symlinked";
+      } catch (err) {
+        console.warn(`\n  could not link ${post.relPath}: ${err.message}`);
+        linkDone++; progress(`  linking media ${linkDone}/${posts.length}`);
+        return "failed";
+      }
     }
   }));
   progressClear();
   if (posts.length > 0) {
-    const counts = { linked: 0, skipped: 0, copied: 0, missing: 0 };
+    const counts = { linked: 0, symlinked: 0, skipped: 0, missing: 0, failed: 0 };
     for (const r of linkResults) counts[r] = (counts[r] || 0) + 1;
     const parts = [];
-    if (counts.linked)  parts.push(`${counts.linked} linked`);
-    if (counts.skipped) parts.push(`${counts.skipped} up-to-date`);
-    if (counts.copied)  parts.push(`${counts.copied} copied (no symlink support)`);
-    if (counts.missing) parts.push(`${counts.missing} missing source`);
+    if (counts.linked)    parts.push(`${counts.linked} hardlinked`);
+    if (counts.symlinked) parts.push(`${counts.symlinked} symlinked (cross-filesystem)`);
+    if (counts.skipped)   parts.push(`${counts.skipped} up-to-date`);
+    if (counts.missing)   parts.push(`${counts.missing} missing source`);
+    if (counts.failed)    parts.push(`${counts.failed} failed`);
     console.log(`  media: ${parts.join(", ")}`);
   }
 
