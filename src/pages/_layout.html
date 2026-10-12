@@ -12,5 +12,21 @@
 <body>
   {{{body}}}
   {{{footerScripts}}}
+  <script>
+    // Live-reload: serve.js pushes a "reload" event over SSE after every
+    // successful build. The feed/gallery index then refreshes without a
+    // manual Cmd-R. Detail pages are skipped — reloading mid-playback would
+    // interrupt whatever the user is watching, and the detail page content
+    // is a stable snapshot anyway.
+    // No-op when _site/ is served from a different environment (plain static
+    // deploy) — EventSource silently retries forever, no page break.
+    try {
+      const es = new EventSource('/_api/live');
+      es.addEventListener('reload', function () {
+        if (location.pathname.indexOf('/post/') !== -1) return;
+        location.reload();
+      });
+    } catch (e) { /* no EventSource support — skip */ }
+  </script>
 </body>
 </html>

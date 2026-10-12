@@ -12,6 +12,7 @@ import { spawn } from "child_process";
 import { createServer as netCreateServer } from "net";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
+import { platform } from "os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const cwd = process.cwd();
@@ -53,16 +54,19 @@ function pickFreePort() {
   });
 }
 
-function runStep(label, args, runEnv) {
-  console.log(`vig: ${label}…`);
-  return new Promise((res, rej) => {
-    const proc = spawn("node", args, { stdio: "inherit", env: runEnv });
-    proc.on("error", rej);
-    proc.on("exit", (code) => {
-      if (code === 0) res();
-      else rej(new Error(`${label} exited with code ${code}`));
-    });
-  });
+// Open the URL in the user's default browser. Platform-specific; silently
+// no-ops on failure (user still has the clickable URL in the terminal).
+// Set VIG_NO_OPEN=1 to disable (headless use, SSH session, …).
+function openInBrowser(url) {
+  if (process.env.VIG_NO_OPEN === "1") return;
+  const p = platform();
+  const [cmd, ...prefix] =
+      p === "darwin" ? ["open"]
+    : p === "win32"  ? ["cmd.exe", "/c", "start", ""]
+    :                  ["xdg-open"];
+  try {
+    spawn(cmd, [...prefix, url], { detached: true, stdio: "ignore" }).unref();
+  } catch { /* no-op */ }
 }
 
 async function main() {
@@ -70,17 +74,27 @@ async function main() {
   const port = parseInt(process.env.VIG_PORT || "", 10) || (await pickFreePort());
   const url = `http://localhost:${port}`;
 
-  // 1. Build into .vig/site
-  await runStep("building", [join(__dirname, "build.js")], env);
-
-  // 2. Serve — replaces this process so signals (Ctrl+C) propagate cleanly.
+  // Announce the URL immediately, before serve.js starts. For big libraries
+  // the initial build takes tens of seconds and would otherwise scroll this
+  // out of view — serve.js also reprints it after every rebuild for the
+  // same reason.
   console.log(`vig: serving ${cwd}`);
   console.log(`     ${clickable(url)}`);
+
+  // serve.js handles the initial build itself (via its startup triggerRebuild),
+  // so we don't run build.js separately here — that would cause a full build
+  // followed by a redundant second build on serve startup.
   const serveProc = spawn(
     "node",
     [join(__dirname, "serve.js")],
     { stdio: "inherit", env: { ...env, VIG_PORT: String(port) } },
   );
+
+  // Open the browser once serve.js has had a moment to start listening. The
+  // page will show a live-reload spinner during the initial build (see
+  // _layout.html's EventSource listener); the user doesn't have to wait or
+  // reload manually.
+  setTimeout(() => openInBrowser(url), 500);
 
   // Forward common signals to the child so Ctrl+C in the CLI stops the server.
   for (const sig of ["SIGINT", "SIGTERM"]) {

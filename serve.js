@@ -75,6 +75,38 @@ function heatFor(slug) {
 
 // ─── Static ──────────────────────────────────────────────────────────────────
 
+// Tiny HTML shown when the user hits "/" (or "/index.html") during the first
+// build, before index.html has been written. Connects to /_api/live and
+// reloads itself the moment the build broadcasts "reload".
+const BUILDING_PAGE = `<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<title>vig — building…</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #f5f5f5;
+    font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased; }
+  main { height: 100%; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 16px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #0095f6;
+    animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 0.3; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1.1); } }
+  p { color: #a8a8a8; }
+</style></head>
+<body>
+<main>
+  <div class="dot"></div>
+  <p>vig is building the gallery — this page will refresh automatically.</p>
+</main>
+<script>
+  try {
+    const es = new EventSource('/_api/live');
+    es.addEventListener('reload', function () { location.reload(); });
+  } catch (e) {}
+</script>
+</body></html>`;
+
 async function serveStatic(req, res) {
   let urlPath = decodeURIComponent(req.url.split("?")[0]);
   if (urlPath === "/") urlPath = "/index.html";
@@ -88,12 +120,25 @@ async function serveStatic(req, res) {
     if (st.isDirectory()) {
       const idx = join(filePath, "index.html");
       if (existsSync(idx)) return serveFile(idx, req, res);
-      return send(res, 404, "not found");
+      return servePlaceholderOrNotFound(urlPath, res);
     }
     return serveFile(filePath, req, res);
   } catch {
-    return send(res, 404, "not found");
+    return servePlaceholderOrNotFound(urlPath, res);
   }
+}
+
+// Return the "building…" page for root-ish requests when _site/ isn't ready
+// yet; otherwise a plain 404.
+function servePlaceholderOrNotFound(urlPath, res) {
+  if (urlPath === "/index.html" || urlPath === "/") {
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-cache",
+    });
+    return res.end(BUILDING_PAGE);
+  }
+  return send(res, 404, "not found");
 }
 
 async function serveFile(filePath, req, res) {
@@ -166,6 +211,14 @@ function runOnce() {
   proc.on("exit", (code) => {
     const ms = Date.now() - t0;
     console.log(`[rebuild] done in ${ms}ms (exit ${code})`);
+    // Reprint the URL after every rebuild so it stays visible at the bottom
+    // of the log — a 30-second build for a large library scrolls the startup
+    // URL announcement out of view otherwise.
+    console.log(`  → ${clickable(`http://localhost:${PORT}`)}`);
+    // Only broadcast reload on success — a crashed build may have left the
+    // site in a half-rewritten state; forcing a browser refresh would just
+    // show the user the broken intermediate HTML.
+    if (code === 0) broadcastReload();
     if (rebuildQueued) runOnce();
     else rebuilding = false;
   });
@@ -303,11 +356,49 @@ async function handleHeatApi(req, res, url) {
   return sendJson(res, 405, { error: "method not allowed" });
 }
 
+// ─── Live reload (Server-Sent Events) ───────────────────────────────────────
+// Clients open a long-lived connection to /_api/live; after every successful
+// rebuild we push a "reload" event so the open browser refreshes without the
+// user having to hit Cmd-R. The listener on the HTML side lives in
+// src/pages/_layout.html.
+
+const sseClients = new Set();
+
+function handleLiveStream(req, res) {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  res.write(": connected\n\n");
+  sseClients.add(res);
+  // Keep-alive ping every 25s — some proxies / Chrome time out silent SSE
+  // streams around 30s otherwise.
+  const ping = setInterval(() => {
+    try { res.write(": ping\n\n"); }
+    catch { clearInterval(ping); sseClients.delete(res); }
+  }, 25000);
+  const cleanup = () => { clearInterval(ping); sseClients.delete(res); };
+  req.on("close", cleanup);
+  req.on("error", cleanup);
+}
+
+function broadcastReload() {
+  for (const res of sseClients) {
+    try { res.write("event: reload\ndata: 1\n\n"); }
+    catch { sseClients.delete(res); }
+  }
+}
+
 // ─── Server ──────────────────────────────────────────────────────────────────
 
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://localhost:${PORT}`);
+    if (url.pathname === "/_api/live") {
+      return handleLiveStream(req, res);
+    }
     if (url.pathname === "/_api/shots") {
       return await handleShotsApi(req, res, url);
     }
@@ -327,6 +418,7 @@ server.listen(PORT, () => {
   console.log(`  videos: ${VIDEOS_ROOT}`);
   console.log(`  api:    /_api/shots?slug=<post-slug>  [GET | POST | PUT]`);
   console.log(`          /_api/heat?slug=<post-slug>   [GET | POST]`);
+  console.log(`          /_api/live                    [SSE, live-reload]`);
   setupWatch();
   // Run a build immediately so a fresh `npm run serve` produces output without
   // needing a separate `npm run build` first. Idempotency keeps it cheap when
